@@ -5,7 +5,35 @@
 
 cmake_minimum_required(VERSION 3.5)
 
-project(arabica)
+include("cmake/HunterGate.cmake")
+HunterGate(
+  URL "https://github.com/ruslo/hunter/archive/v0.23.56.tar.gz"
+  SHA1 "2c03e917973b3cce45531fd93f046358b9068122"
+)
+
+project(arabica VERSION 2016.1)
+
+include(GNUInstallDirs)
+
+set(config_install_dir "${CMAKE_INSTALL_LIBDIR}/cmake/${PROJECT_NAME}")
+
+set(generated_dir "${CMAKE_CURRENT_BINARY_DIR}/generated")
+
+set(version_config "${generated_dir}/${PROJECT_NAME}ConfigVersion.cmake")
+set(project_config "${generated_dir}/${PROJECT_NAME}Config.cmake")
+set(TARGETS_EXPORT_NAME "${PROJECT_NAME}Targets")
+
+include(CMakePackageConfigHelpers)
+
+write_basic_package_version_file(
+  "${version_config}" COMPATIBILITY SameMajorVersion
+)
+
+configure_package_config_file(
+  "cmake/Config.cmake.in"
+  "${project_config}"
+  INSTALL_DESTINATION "${config_install_dir}"
+)
 
 # Enable C++11 support
 set(CMAKE_CXX_STANDARD 11)
@@ -93,41 +121,6 @@ if(NOT ARABICA_XML_BACKEND)
 endif()
 
 configure_file(${CMAKE_CURRENT_LIST_DIR}/include/SAX/ArabicaConfig.hpp.in ${CMAKE_CURRENT_BINARY_DIR}/include/SAX/ArabicaConfig.hpp)
-
-#
-# Find boost
-if(BUILD_WITH_BOOST)
-  if(NOT TARGET boost)
-    ## BOOST_ROOT has to be set correctly
-    if(NOT DEFINED BOOST_ROOT)
-      set(BOOST_ROOT "../boost") # reasonable default: boost is in a parallel directory
-    endif()
-    find_package(Boost REQUIRED)
-  endif()
-endif()
-
-#
-# Find expat
-if(ARABICA_XML_BACKEND STREQUAL USE_EXPAT)
-  if(NOT TARGET expat)
-    find_package(EXPAT REQUIRED)
-    set(ADDITIONAL_INC ${EXPAT_INCLUDE_DIRS})
-    set(ADDITIONAL_LIB ${EXPAT_LIBRARY})
-  else()
-    # set externally
-    set(ADDITIONAL_INC ${EXPAT_INCLUDE_DIRS})
-    set(ADDITIONAL_LIB expat)
-  endif()
-endif()
-
-#
-# find libxml2: LIBXML2_INCLUDE_DIR LIBXML2_LIBRARIES
-if(ARABICA_XML_BACKEND STREQUAL USE_LIBXML2)
-  find_package(LibXml2)
-  set(ADDITIONAL_INC ${LIBXML2_INCLUDE_DIR})
-  set(ADDITIONAL_LIB ${LIBXML2_LIBRARIES})
-endif()
-
 
 #
 # platform check
@@ -427,10 +420,8 @@ add_library (${LIB_NAME}
 target_compile_definitions(${LIB_NAME} PUBLIC "$<$<CONFIG:Debug>:ARABICA_DEBUG>")
 target_compile_definitions(${LIB_NAME} PUBLIC ARABICA_NOT_USE_PRAGMA_LINKER_OPTIONS)
 target_include_directories(${LIB_NAME} PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/include>)
-target_include_directories(${LIB_NAME} PUBLIC ${ADDITIONAL_INC} ${Boost_INCLUDE_DIRS})
 target_include_directories(${LIB_NAME} PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_LIST_DIR}/include>)
-# link backend
-target_link_libraries(${LIB_NAME} ${ADDITIONAL_LIB})
+target_include_directories(${LIB_NAME} PUBLIC $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/${PROJECT_NAME}>)
 
 # VS2010 bug for 64bit builds
 if(MSVC)
@@ -451,11 +442,36 @@ if(MSVC)
   )
 endif()
 
+#
+# Find boost
+if(BUILD_WITH_BOOST)
+  hunter_add_package(Boost)
+  find_package(Boost CONFIG REQUIRED)
+  target_link_libraries(${LIB_NAME} Boost::boost)
+endif()
 
 #
-# Add build dependency to boost if boost is part of the same project
-if(TARGET boost)
-  add_dependencies(${LIB_NAME} boost)
+# Find Expat
+if(ARABICA_XML_BACKEND STREQUAL USE_EXPAT)
+  hunter_add_package(Expat)
+  find_package(EXPAT REQUIRED)
+  target_link_libraries(${LIB_NAME} ${EXPAT_LIBRARIES})
+  target_include_directories(${LIB_NAME}
+    PUBLIC
+      ${EXPAT_INCLUDE_DIRS}
+  )
+endif()
+
+#
+# find libxml2
+if(ARABICA_XML_BACKEND STREQUAL USE_LIBXML2)
+  hunter_add_package(libxml2)
+  find_package(libxml2 CONFIG REQUIRED)
+  target_link_libraries(${LIB_NAME} ${LIBXML2_LIBRARIES})
+  target_include_directories(${LIB_NAME}
+    PUBLIC
+      ${LIBXML2_INCLUDE_DIRS}
+  )
 endif()
 
 set_target_properties(${LIB_NAME} PROPERTIES FOLDER "3rdparty/arabica")
@@ -463,21 +479,36 @@ set_target_properties(${LIB_NAME} PROPERTIES FOLDER "3rdparty/arabica")
 #
 # Install library
 #
-install(TARGETS ${LIB_NAME}
-  RUNTIME DESTINATION bin
-  LIBRARY DESTINATION lib
-  ARCHIVE DESTINATION lib/static
+install(
+  TARGETS ${LIB_NAME}
+  EXPORT ${TARGETS_EXPORT_NAME}
+  RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+  LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+  ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
+  INCLUDES DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
 )
 
 install(DIRECTORY include/
-  DESTINATION include/${PROJECT_NAME}
+  DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/${PROJECT_NAME}
   FILES_MATCHING
     PATTERN *.hpp
     PATTERN *.h
 )
 
-install(FILES ${CMAKE_CURRENT_BINARY_DIR}/include/SAX/ArabicaConfig.hpp
-  DESTINATION include/${PROJECT_NAME}/SAX
+install(
+  FILES ${GENERATED_HEADER_FILES}
+  DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/${PROJECT_NAME}/SAX
+)
+
+install(
+  FILES "${project_config}" "${version_config}"
+  DESTINATION "${config_install_dir}"
+)
+
+install(
+  EXPORT "${TARGETS_EXPORT_NAME}"
+  NAMESPACE "arabica::"
+  DESTINATION "${config_install_dir}"
 )
 
 if(BUILD_ARABICA_EXAMPLES)
